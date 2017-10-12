@@ -27,24 +27,63 @@ static ITEM buffer[BUFFER_SIZE];
 
 static void rsleep (int t);			// already implemented (see below)
 static ITEM get_next_item (void);	// already implemented (see below)
+static pthread_cond_t cv[NROF_ITEMS / BUFFER_SIZE];
+static pthread_mutex_t  	mutexes[NROF_ITEMS / BUFFER_SIZE];
+static pthread_mutex_t      mainMutex          = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t mainCV = PTHREAD_COND_INITIALIZER;
 
+static void
+initialize(void)
+{
+	for (int i = 0; i < sizeof(cv); i++) {
+		cv[i] = PTHREAD_COND_INITIALIZER; // Initialize all condition variables
+	}
+	for (int i = 0; i < sizeof(mutexes); i++) {
+		mutexes[i] = PTHREAD_MUTEX_INITIALIZER; // Initialize all condition variables
+	}
+}
+
+static bool
+checkBuffer(int start)
+{
+	for (int i = 0; i < sizeof(buffer); i++) {
+
+		if (buffer[i] != start+i)
+		{
+			return false;
+		}
+	}
+	return true
+}
 
 /* producer thread */
 static void * 
 producer (void * arg)
 {
-    while (true /* TODO: not all items produced */)
+    while (get_next_item() != NROF_ITEMS)
     {
-        // TODO: 
-        // * get the new item
+		ITEM current = get_next_item();
 		
         rsleep (100);	// simulating all kind of activities...
 		
-		// TODO:
-		// * put the item into buffer[]
+		// TODO
+			pthread_cond_t currentCV = cv[current/BUFFER_SIZE];
+			pthread_mutex_t currentMutex = mutexes[current/BUFFER_SIZE];
 		//
         // follow this pseudocode (according to the ConditionSynchronization lecture):
         //      mutex-lock;
+				pthread_mutex_lock (&currentMutex);
+				pthread_cond_wait (&currentCV, &currentMutex);
+				pthread_mutex_lock (&mainMutex);
+				buffer[current % BUFFER_SIZE] = current;
+				pthread_mutex_unlock (&mainMutex);
+
+				int start = (current/BUFFER_SIZE) * BUFFER_SIZE;
+				if (checkBuffer(start)) {
+					pthread_cond_signal(mainCV);
+				}
+				pthread_mutex_unlock (&currentMutex);
+
         //      while not condition-for-this-producer
         //          wait-cv;
         //      critical-section;
@@ -60,7 +99,7 @@ producer (void * arg)
 static void * 
 consumer (void * arg)
 {
-    while (true /* TODO: not all items retrieved from buffer[] */)
+    while (get_next_item() != NROF_ITEMS)
     {
         // TODO: 
 		// * get the next item from buffer[]
@@ -81,6 +120,7 @@ consumer (void * arg)
 
 int main (void)
 {
+	initialize();
     // TODO: 
     // * startup the producer threads and the consumer thread
     // * wait until all threads are finished  
