@@ -22,7 +22,7 @@ typedef int      				ITEM;
 /* NROF_ITEMS
  * number of jobs to be handled by the producers
  */
-#define NROF_ITEMS              20
+#define NROF_ITEMS              200
 
 /* BUFFER_SIZE
  * number of items that fit in the buffer
