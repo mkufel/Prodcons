@@ -63,38 +63,56 @@ checkBuffer(int start)
 static void * 
 producer (void * arg)
 {
+
+	if (bufferSize = BUFFER_SIZE)
+	{
+		pthread_mutex_lock(&mainMutex);
+		pthread_cond_wait (&buffer_empty, &mainMutex);
+		pthread_mutex_unlock(&mainMutex);
+	}
+
 	ITEM current = get_next_item();
 
     while (current != NROF_ITEMS)
     {
-
-		if (bufferSize = BUFFER_SIZE)
-			pthread_cond_wait (&buffer_empty, &mainMutex);
         rsleep (100);	// simulating all kind of activities...
 		pthread_mutex_lock (&localMutex);
-		for (int i = 0; i < sizeof(localBuffer); i++) {
-			if (localBuffer[i] = expectedItem) {
-				ITEM retrieved = localBuffer[i];
-				localBuffer[i] = null;
-				pthread_mutex_unlock(&localMutex);
-				pthread_mutex_lock(&mainMutex);
-				buffer[bufferSize] = retrieved;
-				bufferSize++;
-				pthread_cond_signal (&buffer_not_empty);
-				pthread_mutex_unlock(&mainMutex);
-			} else {
-				if (expectedItem == current) {
-					pthread_mutex_lock(&mainMutex);
-					buffer[bufferSize] = current;
-					bufferSize++;
-					pthread_cond_signal (&buffer_not_empty);
-					pthread_mutex_unlock(&mainMutex);
-				} else {
-					localBuffer[current] = current;
-				}
-			}
-				}
-    }
+		ITEM retrieved = null;
+
+		if (localBuffer[expectedItem] = expectedItem) {
+			retrieved = localBuffer[expectedItem];
+		}
+		pthread_mutex_unlock(&localMutex);
+
+		if (retrieved != null) {
+			pthread_mutex_lock(&mainMutex);
+			buffer[bufferSize] = retrieved;
+			bufferSize++;
+			pthread_cond_signal(&buffer_not_empty);
+			pthread_mutex_unlock(&mainMutex);
+		} else if (expectedItem == current) {
+			pthread_mutex_lock(&mainMutex);
+			buffer[bufferSize] = current;
+			bufferSize++;
+			pthread_cond_signal (&buffer_not_empty);
+			pthread_mutex_unlock(&mainMutex);
+		} else {
+			localBuffer[current] = current;
+		}
+	}
+
+	// TODO:
+	// * put the item into buffer[]
+	//
+	// follow this pseudocode (according to the ConditionSynchronization lecture):
+	//      mutex-lock;
+	//      while not condition-for-this-producer
+	//          wait-cv;
+	//      critical-section;
+	//      possible-cv-signals;
+	//      mutex-unlock;
+	//
+	// (see condition_test() in condition_basics.c how to use
 
 
 	return (NULL);
