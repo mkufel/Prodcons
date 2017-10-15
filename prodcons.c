@@ -60,38 +60,7 @@ checkBuffer(int start)
 static void * 
 producer (void * arg)
 {
-    while (get_next_item() != NROF_ITEMS)
-    {
-		ITEM current = get_next_item();
-		
-        rsleep (100);	// simulating all kind of activities...
-		
-		// TODO
-			pthread_cond_t currentCV = cv[current/BUFFER_SIZE];
-			pthread_mutex_t currentMutex = mutexes[current/BUFFER_SIZE];
-		//
-        // follow this pseudocode (according to the ConditionSynchronization lecture):
-        //      mutex-lock;
-				pthread_mutex_lock (&currentMutex);
-				pthread_cond_wait (&currentCV, &currentMutex);
-				pthread_mutex_lock (&mainMutex);
-				buffer[current % BUFFER_SIZE] = current;
-				pthread_mutex_unlock (&mainMutex);
-
-				int start = (current/BUFFER_SIZE) * BUFFER_SIZE;
-				if (checkBuffer(start)) {
-					pthread_cond_signal(mainCV);
-				}
-				pthread_mutex_unlock (&currentMutex);
-
-        //      while not condition-for-this-producer
-        //          wait-cv;
-        //      critical-section;
-        //      possible-cv-signals;
-        //      mutex-unlock;
-        //
-        // (see condition_test() in condition_basics.c how to use condition variables)
-    }
+    
 	return (NULL);
 }
 
@@ -99,8 +68,26 @@ producer (void * arg)
 static void * 
 consumer (void * arg)
 {
-    while (get_next_item() != NROF_ITEMS)
-    {
+    while (true)
+	{
+		if (exp_item == NROF_ITEMS) break;
+
+		if (bufferSize > 0) {
+			pthread_mutex_lock(&mainMutex);
+
+			for (int i = 0; i < bufferSize; i++) {
+
+				if (buffer[i] == exp_item) {
+					printf("%d\n", buffer[i]);
+					exp_item++;
+				}
+			}
+			pthread_cond_signal(buffer_empty);
+			pthread_mutex_unlock(&mainMutex);
+
+		} else {
+			pthread_cond_wait(buffer_not_empty);
+		}
         // TODO: 
 		// * get the next item from buffer[]
 		// * print the number to stdout
