@@ -24,82 +24,116 @@
 #include "prodcons.h"
 
 static ITEM buffer[BUFFER_SIZE];
+static ITEM localBuffer[NROF_ITEMS];
 
 static void rsleep (int t);			// already implemented (see below)
 static ITEM get_next_item (void);	// already implemented (see below)
-static pthread_mutex_t  	localMutex 		   = PTHREAD_MUTEX_INITIALIZER; // for local buffer
-static pthread_mutex_t      mainMutex          = PTHREAD_MUTEX_INITIALIZER; // for main buffer
-static pthread_cond_t buffer_full = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t buffer_empty = PTHREAD_COND_INITIALIZER;
+
+//static pthread_cond_t buffer_full = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t buffer_not_empty = PTHREAD_COND_INITIALIZER;
-static ITEM expectedItem = 0;
-static ITEM localBuffer[NROF_ITEMS];
+
+
+static pthread_mutex_t buffer_lock = PTHREAD_MUTEX_INITIALIZER; // for main buffer
+static pthread_mutex_t  	localMutex 		   = PTHREAD_MUTEX_INITIALIZER; // for local buffer
+
+static pthread_cond_t buffer_empty = PTHREAD_COND_INITIALIZER;
+
 static int bufferSize = 0;
+static int expectedItem = 0;
 
 
-//static void
-//initialize(void)
-//{
-//	for (int i = 0; i < sizeof(cv); i++) {
-//		cv[i] = PTHREAD_COND_INITIALIZER; // Initialize all condition variables
-//	}
-//}
-
-static bool
-checkBuffer(int start)
+static void
+initialize(void)
 {
-	for (int i = 0; i < sizeof(buffer); i++) {
-
-		if (buffer[i] != start+i)
-		{
-			return false;
-		}
+	for (int i = 0; i < NROF_ITEMS; i++) {
+		localBuffer[i] = -1; // Initialize all condition variables
 	}
-	return true;
 }
 
+//static bool
+//checkBuffer(int start)
+//{
+//	for (int i = 0; i < sizeof(buffer); i++) {
+//
+//		if (buffer[i] != start+i)
+//		{
+//			return false;
+//		}
+//	}
+//	return true;
+//}
+
 /* producer thread */
-static void * 
+static void *
 producer (void * arg)
 {
+	printf("Thread starting...\n");
 
-	if (bufferSize = BUFFER_SIZE)
-	{
-		pthread_mutex_lock(&mainMutex);
-		pthread_cond_wait (&buffer_empty, &mainMutex);
-		pthread_mutex_unlock(&mainMutex);
-	}
+	int current = 0;
+	printf("Number of items: %d\n", NROF_ITEMS);
+	printf("Number of currents: %d\n", current);
+	bool condition = (current == NROF_ITEMS);
+	printf("%d\n", condition);
 
-	ITEM current = get_next_item();
+//	while (current == NROF_ITEMS)
+//	{
+//		printf("Inside");
+////		bool condition = (current = NROF_ITEMS);
+////		printf("Current: %d and NR_OF_ITEMS: %d are equal: %d", current, NROF_ITEMS, condition);
+//		current++;
+//	}
 
     while (current != NROF_ITEMS)
     {
-        rsleep (100);	// simulating all kind of activities...
-		pthread_mutex_lock (&localMutex);
-		ITEM retrieved = NULL;
 
-		if (localBuffer[expectedItem] = expectedItem) {
+//		pthread_mutex_lock(&buffer_lock);
+//		if (bufferSize == BUFFER_SIZE)
+//		{
+//			printf("Buffer is full, waiting...\n");
+//			pthread_cond_wait (&buffer_empty, &buffer_lock);
+//		}
+//		pthread_mutex_unlock(&buffer_lock);
+
+
+		if (expectedItem == localBuffer[expectedItem]) {
+			printf("Item: %d has already been retrieved before\n", expectedItem);
+			expectedItem++;
+			continue;
+		}
+		current = get_next_item();
+		printf("Got item %d, processing...\n", current);
+		ITEM retrieved = NULL;
+		rsleep (3000);	// simulating all kind of activities...
+
+		pthread_mutex_lock (&localMutex);
+		if (localBuffer[expectedItem] == expectedItem) {
 			retrieved = localBuffer[expectedItem];
 		}
 		pthread_mutex_unlock(&localMutex);
 
 		if (retrieved != NULL) {
-			pthread_mutex_lock(&mainMutex);
+			printf("Retrieved item: %d from the local buffer\n", retrieved);
+			pthread_mutex_lock(&buffer_lock);
 			buffer[bufferSize] = retrieved;
 			bufferSize++;
+			expectedItem++;
 			pthread_cond_signal(&buffer_not_empty);
-			pthread_mutex_unlock(&mainMutex);
+			pthread_mutex_unlock(&buffer_lock);
 		} else if (expectedItem == current) {
-			pthread_mutex_lock(&mainMutex);
+			printf("Got the expected item: %d\n", current);
+			pthread_mutex_lock(&buffer_lock);
 			buffer[bufferSize] = current;
 			bufferSize++;
+			expectedItem++;
 			pthread_cond_signal (&buffer_not_empty);
-			pthread_mutex_unlock(&mainMutex);
+			pthread_mutex_unlock(&buffer_lock);
 		} else {
+			printf("Got the wrong item: %d, storing locally\n", current);
 			localBuffer[current] = current;
 		}
+		retrieved = NULL;
 	}
-
+	printf("Left the loop\n");
 	// TODO:
 	// * put the item into buffer[]
 	//
@@ -117,51 +151,58 @@ producer (void * arg)
 	return (NULL);
 }
 
-/* consumer thread */
-static void * 
-consumer (void * arg)
-{
-
-    while (true)
-	{
-		if (expectedItem == NROF_ITEMS) break;
-
-		if (bufferSize > 0) {
-			pthread_mutex_lock(&mainMutex);
-
-			for (int i = 0; i < bufferSize; i++) {
-
-				if (buffer[i] == expectedItem) {
-					printf("%d\n", buffer[i]);
-					expectedItem++;
-				}
-			}
-			pthread_cond_signal(&buffer_empty);
-			pthread_mutex_unlock(&mainMutex);
-
-		} else {
-			pthread_cond_wait(&buffer_not_empty, &mainMutex);
-		}
-		
-        rsleep (100);		// simulating all kind of activities...
-    }
-	return (NULL);
-}
+///* consumer thread */
+//static void *
+//consumer (void * arg)
+//{
+//
+//    while (true)
+//	{
+//		if (expectedItem == NROF_ITEMS) break;
+//
+//		if (bufferSize > 0) {
+//			pthread_mutex_lock(&mainMutex);
+//
+//			for (int i = 0; i < bufferSize; i++) {
+//
+//				if (buffer[i] == expectedItem) {
+//					printf("%d\n", buffer[i]);
+//					expectedItem++;
+//				}
+//			}
+//			bufferSize = 0;
+//			pthread_cond_signal(&buffer_empty);
+//			pthread_mutex_unlock(&mainMutex);
+//
+//		} else {
+//			pthread_cond_wait(&buffer_not_empty, &mainMutex);
+//		}
+//
+//        rsleep (100);		// simulating all kind of activities...
+//    }
+//	return (NULL);
+//}
 
 int main (void)
 {
+	printf("Main started\n");
+	initialize();
+	pthread_t producerThread[NROF_PRODUCERS];
 
-	pthread_t   producerThread[NROF_PRODUCERS];
-	for (int i = 0; i < NROF_PRODUCERS; i++) {
-		pthread_create (&producerThread[i], NULL, producer, NULL);
+	for (int i = 0; i < 1; i++) {
+		pthread_create(&producerThread[i], NULL, producer, NULL);
+		printf("Thread created\n");
+		rsleep(20000);
 	}
-	for (int i = 0; i < NROF_PRODUCERS; i++) {
-		pthread_join   (&producerThread[i], NULL);
+	for (int i = 0; i < 1; i++) {
+		pthread_join(producerThread[i], NULL);
+		printf("Thread joined");
+		rsleep(2000);
 	}
-
-	pthread_t consumerThread;
-	pthread_create(&consumerThread, NULL, consumer, NULL);
-	pthread_join(&consumerThread, NULL);
+//
+//	pthread_t consumerThread;
+//	pthread_create(&consumerThread, NULL, consumer, NULL);
+//	pthread_join(&consumerThread, NULL);
 
     return (0);
 }
