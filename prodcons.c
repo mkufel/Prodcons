@@ -31,7 +31,6 @@ static pthread_mutex_t  	localMutex 		   = PTHREAD_MUTEX_INITIALIZER; // for loc
 static pthread_mutex_t      mainMutex          = PTHREAD_MUTEX_INITIALIZER; // for main buffer
 static pthread_cond_t buffer_full = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t buffer_empty = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t buffer_empty = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t buffer_not_empty = PTHREAD_COND_INITIALIZER;
 static ITEM expectedItem = 0;
 static ITEM localBuffer[NROF_ITEMS];
@@ -77,14 +76,14 @@ producer (void * arg)
     {
         rsleep (100);	// simulating all kind of activities...
 		pthread_mutex_lock (&localMutex);
-		ITEM retrieved = null;
+		ITEM retrieved = NULL;
 
 		if (localBuffer[expectedItem] = expectedItem) {
 			retrieved = localBuffer[expectedItem];
 		}
 		pthread_mutex_unlock(&localMutex);
 
-		if (retrieved != null) {
+		if (retrieved != NULL) {
 			pthread_mutex_lock(&mainMutex);
 			buffer[bufferSize] = retrieved;
 			bufferSize++;
@@ -125,23 +124,23 @@ consumer (void * arg)
 
     while (true)
 	{
-		if (exp_item == NROF_ITEMS) break;
+		if (expectedItem == NROF_ITEMS) break;
 
 		if (bufferSize > 0) {
 			pthread_mutex_lock(&mainMutex);
 
 			for (int i = 0; i < bufferSize; i++) {
 
-				if (buffer[i] == exp_item) {
+				if (buffer[i] == expectedItem) {
 					printf("%d\n", buffer[i]);
-					exp_item++;
+					expectedItem++;
 				}
 			}
-			pthread_cond_signal(buffer_empty);
+			pthread_cond_signal(&buffer_empty);
 			pthread_mutex_unlock(&mainMutex);
 
 		} else {
-			pthread_cond_wait(buffer_not_empty);
+			pthread_cond_wait(&buffer_not_empty, &mainMutex);
 		}
 		
         rsleep (100);		// simulating all kind of activities...
@@ -152,10 +151,18 @@ consumer (void * arg)
 int main (void)
 {
 
-    // TODO: 
-    // * startup the producer threads and the consumer thread
-    // * wait until all threads are finished  
-    
+	pthread_t   producerThread[NROF_PRODUCERS];
+	for (int i = 0; i < NROF_PRODUCERS; i++) {
+		pthread_create (&producerThread[i], NULL, producer, NULL);
+	}
+	for (int i = 0; i < NROF_PRODUCERS; i++) {
+		pthread_join   (&producerThread[i], NULL);
+	}
+
+	pthread_t consumerThread;
+	pthread_create(&consumerThread, NULL, consumer, NULL);
+	pthread_join(&consumerThread, NULL);
+
     return (0);
 }
 
