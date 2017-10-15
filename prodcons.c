@@ -2,8 +2,8 @@
  * Operating Systems [2INCO] Practical Assignment
  * Condition Variables Application
  *
- * STUDENT_NAME_1 (STUDENT_NR_1)
- * STUDENT_NAME_2 (STUDENT_NR_2)
+ * Ahmed Ahres (0978238)
+ * Maciej Kufel (0944597)
  *
  * Grading:
  * Students who hand in clean code that fully satisfies the minimum requirements will get an 8. 
@@ -38,13 +38,13 @@ static ITEM localBuffer[NROF_ITEMS];
 static int bufferSize = 0;
 
 
-static void
-initialize(void)
-{
-	for (int i = 0; i < sizeof(cv); i++) {
-		cv[i] = PTHREAD_COND_INITIALIZER; // Initialize all condition variables
-	}
-}
+//static void
+//initialize(void)
+//{
+//	for (int i = 0; i < sizeof(cv); i++) {
+//		cv[i] = PTHREAD_COND_INITIALIZER; // Initialize all condition variables
+//	}
+//}
 
 static bool
 checkBuffer(int start)
@@ -95,6 +95,8 @@ producer (void * arg)
 			}
 				}
     }
+
+
 	return (NULL);
 }
 
@@ -103,19 +105,26 @@ static void *
 consumer (void * arg)
 {
 
-    while ( != NROF_ITEMS)
-    {
-        // TODO: 
-		// * get the next item from buffer[]
-		// * print the number to stdout
-        //
-        // follow this pseudocode (according to the ConditionSynchronization lecture):
-        //      mutex-lock;
-        //      while not condition-for-this-consumer
-        //          wait-cv;
-        //      critical-section;
-        //      possible-cv-signals;
-        //      mutex-unlock;
+    while (true)
+	{
+		if (exp_item == NROF_ITEMS) break;
+
+		if (bufferSize > 0) {
+			pthread_mutex_lock(&mainMutex);
+
+			for (int i = 0; i < bufferSize; i++) {
+
+				if (buffer[i] == exp_item) {
+					printf("%d\n", buffer[i]);
+					exp_item++;
+				}
+			}
+			pthread_cond_signal(buffer_empty);
+			pthread_mutex_unlock(&mainMutex);
+
+		} else {
+			pthread_cond_wait(buffer_not_empty);
+		}
 		
         rsleep (100);		// simulating all kind of activities...
     }
@@ -124,7 +133,6 @@ consumer (void * arg)
 
 int main (void)
 {
-	initialize();
 
     // TODO: 
     // * startup the producer threads and the consumer thread
