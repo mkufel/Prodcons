@@ -23,244 +23,204 @@
 
 #include "prodcons.h"
 
-static ITEM buffer[BUFFER_SIZE];
-static ITEM localBuffer[NROF_ITEMS];
-
-static void rsleep (int t);			// already implemented (see below)
 static ITEM get_next_item (void);	// already implemented (see below)
 
-//static pthread_cond_t buffer_full = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t buffer_not_empty = PTHREAD_COND_INITIALIZER;
-
-
-static pthread_mutex_t buffer_lock = PTHREAD_MUTEX_INITIALIZER; // for main buffer
-static pthread_mutex_t  	localMutex 		   = PTHREAD_MUTEX_INITIALIZER; // for local buffer
+static pthread_mutex_t buffer_lock = PTHREAD_MUTEX_INITIALIZER; // mutex for the buffer
 
 static pthread_cond_t buffer_empty = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t buffer_not_empty = PTHREAD_COND_INITIALIZER;
+
+static ITEM buffer[BUFFER_SIZE];
+static ITEM side_buffer[NROF_ITEMS];	// buffer to store items retrieved out of order
 
 static int buffer_size = 0;
-static int exp_item = 0;
-static int exp_item_to_receive = 0;
+static int exp_item = 0;	// used by producers to keep track of the next expected item
+static int exp_item_to_consume = 0;	// used by the consumer to keep track of the next item that should be consumed
 
 
+/*
+ * initialize()
+ *
+ * Initializes values of all items in the side buffer to -1 to make sure the initial value of an elt of the array
+ * does not correspond to any expected item.
+ */
 static void
-initialize(void)
+initialize()
 {
 	for (int i = 0; i < NROF_ITEMS; i++) {
-		localBuffer[i] = -1; // Initialize all condition variables
+		side_buffer[i] = -1;
 	}
 }
 
-static bool
-checkBuffer(int start)
-{
-	for (int i = 0; i < sizeof(buffer); i++) {
 
-		if (buffer[i] != start+i)
-		{
-			return false;
-		}
-	}
-	return true;
-}
-
-static bool
-isBufferFull()
+/*
+ * buffer_check()
+ *
+ * @pre buffer_lock has been locked by the caller.
+ * Checks if there is remaining space in the buffer.
+ */
+static void
+buffer_check()
 {
     if (buffer_size >= BUFFER_SIZE)
     {
-        printf("%d buffer is full, waiting...\n", pthread_self());
-        pthread_cond_wait (&buffer_empty, &buffer_lock);
-        printf("%d resumed after buffer full\n", pthread_self());
+        if (pthread_cond_wait (&buffer_empty, &buffer_lock) != 0) {
+			perror ("Producer waiting for buffer_empty failed\n");
+		}
     }
 }
+
 
 /* producer thread */
 static void *
 producer (void * arg)
 {
-//	printf("Producer starting...\n");
     ITEM current = 0;
 
     while (current != NROF_ITEMS)
     {
-
-		pthread_mutex_lock(&buffer_lock);
-		printf("Producer with the exp: %d\n", exp_item);
-        isBufferFull();
-        pthread_mutex_unlock(&buffer_lock);
-
-        pthread_mutex_lock(&buffer_lock);
-		if (buffer_size >= 5) {
-			printf("Buffer is full, want to wait...\n");
-			pthread_cond_wait(&buffer_empty, &buffer_lock);
-			printf("Buffer not full anymore\n");
+		if (pthread_mutex_lock(&buffer_lock) != 0) {
+			perror ("Producer cannot lock the buffer_lock\n");
 		}
-		if (exp_item == localBuffer[exp_item]) {
-			printf("Item: %d has already been retrieved before, ", exp_item);
 
+		buffer_check();
 
+		if (exp_item == side_buffer[exp_item]) {	// Check if the expected item has already been retrieved before
+			buffer[buffer_size] = side_buffer[exp_item];
 
-            buffer[buffer_size] = localBuffer[exp_item];
-            buffer_size++;
+			buffer_size++;
             exp_item++;
-//            printf("Putting %d in the buffer, buffer size: %d...\n", localBuffer[exp_item-1], buffer_size);
-//            rsleep(300000);
-            pthread_cond_signal (&buffer_not_empty);
-            pthread_mutex_unlock(&buffer_lock);
-            printf("Unlocked the buffer after local retrieval\n");
-			continue;
-		}
-        pthread_mutex_unlock(&buffer_lock);
 
+            if (pthread_cond_signal (&buffer_not_empty) != 0) {
+				perror ("Producer cannot send the buffer_not_empty signal after storing an old item\n");
+			}
+
+            if (pthread_mutex_unlock(&buffer_lock) != 0) {
+				perror ("Producer cannot unlock the buffer_lock after storing an old item\n");
+			}
+
+			continue;	//skip the rest of the loop
+		}
+
+		if (pthread_mutex_unlock(&buffer_lock) != 0) {
+			perror ("Producer cannot unlock the buffer_lock\n");
+		}
 
         current = get_next_item();
 
-        if (current == NROF_ITEMS) break;
-        printf("Got a new item %d, processing...\n", current);
-//		rsleep (300000);	// simulating all kind of activities...
+        if (current == NROF_ITEMS) break;	// if all items retrieved, break
 
 
-		if (exp_item == current) {
-			printf("Thread: %d got the expected item: %d\n", pthread_self(), current);
-			pthread_mutex_lock(&buffer_lock);
+		if (exp_item == current) {	//if got the exp_item, store in the buffer
 
-			if (buffer_size >= 5) {
-				printf("Buffer is full, want to wait with a retrieved one\n");
-				pthread_cond_wait(&buffer_empty, &buffer_lock);
-				printf("Buffer not full anymore with retrieved \n");
+			if (pthread_mutex_lock(&buffer_lock) != 0) {
+				perror ("Producer cannot lock the buffer_lock before storing a new item\n");
 			}
 
-            buffer[buffer_size] = current;
+			buffer_check();
+			buffer[buffer_size] = current;
+
 			buffer_size++;
             exp_item++;
-            printf("Putting a retrieved one: %d in the buffer...\n", current);
-            pthread_cond_signal (&buffer_not_empty);
-			pthread_mutex_unlock(&buffer_lock);
-//            printf("Unlocked the buffer\n");
-        } else {
-			printf("Thread: %d got the wrong item: %d, storing locally...\n", pthread_self(), current);
-//            rsleep(300000);
-            localBuffer[current] = current;
+
+			if (pthread_cond_signal (&buffer_not_empty) != 0) {
+				perror ("Producer cannot send the buffer_not_empty signal after storing a new item\n");
+			}
+
+			if (pthread_mutex_unlock(&buffer_lock) != 0) {
+				perror ("Producer cannot unlock the buffer_lock after storing a new item\n");
+			}
+
+        } else {	// if got an item different than exp_item, store in the side buffer
+            side_buffer[current] = current;
 		}
-
 	}
-	printf("Producer: %d terminating with exp_item: %d \n", pthread_self(), exp_item);
-	// TODO:
-	// * put the item into buffer[]
-	//
-	// follow this pseudocode (according to the ConditionSynchronization lecture):
-	//      mutex-lock;
-	//      while not condition-for-this-producer
-	//          wait-cv;
-	//      critical-section;
-	//      possible-cv-signals;
-	//      mutex-unlock;
-	//
-	// (see condition_test() in condition_basics.c how to use
-
 
 	return (NULL);
 }
 
-///* consumer thread */
+
+/* consumer thread */
 static void *
 consumer (void * arg)
 {
-//    printf("Consumer started\n");
     while (true)
 	{
-        printf("Consumer iteration, expecting: %d\n", exp_item_to_receive);
-		if (exp_item_to_receive == NROF_ITEMS) {
-			printf("Consumer done, broadcasting signal_empty\n");
-			pthread_mutex_lock(&buffer_lock);
-            pthread_cond_broadcast(&buffer_empty);
-            pthread_mutex_unlock(&buffer_lock);
+		if (exp_item_to_consume == NROF_ITEMS) {	// if already consumed all expected items, break
             break;
         }
 
-        pthread_mutex_lock(&buffer_lock);
-        if (buffer_size == 0) {
-            printf("Consumer Starving\n");
-            pthread_cond_wait(&buffer_not_empty, &buffer_lock);
-			printf("Consumer smelled blood\n");
+        if (pthread_mutex_lock(&buffer_lock) != 0) {
+			perror ("Consumer cannot lock the buffer_lock\n");
 		}
 
-		if (buffer_size > 0) {
-            printf("Locked the buffer to consume, current size: %d \n", buffer_size);
+        if (buffer_size == 0) {		//if buffer empty, wait for signal buffer_not_empty
+
+			if(pthread_cond_wait(&buffer_not_empty, &buffer_lock) != 0) {
+				perror ("Consumer waiting for buffer_not_empty failed\n");
+			}
+		}
+
+		if (buffer_size > 0) {	// if buffer not empty
 			for (int i = 0; i < buffer_size; i++) {
-				printf("Checking %dth index in the buffer with the exp: %d and buf[i; %d\n", i, exp_item_to_receive, buffer[i]);
-				if (buffer[i] == exp_item_to_receive) {
+
+				if (buffer[i] == exp_item_to_consume) {	//consume the next item if equal to exp_item_to_consume
 					printf("%d\n", buffer[i]);
-					exp_item_to_receive++;
+					exp_item_to_consume++;
 				}
 			}
-			buffer_size = 0;
+
+			buffer_size = 0;	// all item have been consumed, set the size to 0
 		}
 
-        pthread_cond_broadcast(&buffer_empty);
-		printf("Consumed all the items, broadcast singal_empty and unlocked buffer_lock\n");
-		pthread_mutex_unlock(&buffer_lock);
+		//brodcast the signal, because all the producers are waiting to start operating on the buffer again
+        if (pthread_cond_broadcast(&buffer_empty) != 0) {
+			perror ("Consumer cannot send the buffer_empty signal\n");
+		}
 
+		if(pthread_mutex_unlock(&buffer_lock) != 0) {
+			perror ("Consumer cannot unlock the buffer_lock\n");
+		}
     }
+
 	return (NULL);
 }
 
+
 int main (void)
 {
-//	printf("Main started\n");
-	initialize();
 	pthread_t producers[NROF_PRODUCERS];
     pthread_t consumerId;
 
+	initialize();
 
-    if (pthread_create(&consumerId, NULL, consumer, NULL) != 0) {
+	if (pthread_create(&consumerId, NULL, consumer, NULL) != 0) {	// create the consumer
         printf("Error creating the consumer thread.");
     }
 
-	for (int i = 0; i < NROF_PRODUCERS; i++) {
-		pthread_create(&producers[i], NULL, producer, NULL);
-//		printf("Thread created\n");
-//		rsleep(20000);
+	for (int i = 0; i < NROF_PRODUCERS; i++) {	// create producers
+
+		if (pthread_create(&producers[i], NULL, producer, NULL) != 0) {
+			printf("Error creating a producer thread.");
+		}
 	}
 
-    pthread_join(consumerId, NULL);
-//    printf("Joined consumer");
-
-    for (int i = 0; i < NROF_PRODUCERS; i++) {
-		pthread_join(producers[i], NULL);
-//		printf("Thread joined\n");
-//		rsleep(2000);
+    if (pthread_join(consumerId, NULL) != 0) { // wait for the consumer to terminate
+		printf("Error joining the consumer thread.");
 	}
-//
-//	pthread_t consumerThread;
-//	pthread_create(&consumerThread, NULL, consumer, NULL);
-//	pthread_join(&consumerThread, NULL);
+
+    for (int i = 0; i < NROF_PRODUCERS; i++) {	// wait for producers to terminate
+
+		if (pthread_join(producers[i], NULL) != 0) {
+			printf("Error joining a producer thread.");
+		}
+	}
 
     return (0);
 }
 
+
 /*
- * rsleep(int t)
- *
- * The calling thread will be suspended for a random amount of time between 0 and t microseconds
- * At the first call, the random generator is seeded with the current time
- */
-static void 
-rsleep (int t)
-{
-    static bool first_call = true;
-    
-    if (first_call == true)
-    {
-        srandom (time(NULL));
-        first_call = false;
-    }
-    usleep (random () % t);
-}
-
-
-/* 
  * get_next_item()
  *
  * description:
